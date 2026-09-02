@@ -2423,9 +2423,12 @@ func getAvatar(c *gin.Context) {
 	if db == nil {
 		return
 	}
+
 	id := c.Param("id")
 	q := query.Use(db)
-	if _, err := q.User.Where(query.User.ID.Eq(id)).First(); err != nil {
+
+	user, err := q.User.Where(query.User.ID.Eq(id)).First()
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
@@ -2434,6 +2437,28 @@ func getAvatar(c *gin.Context) {
 		return
 	}
 
+	// アップロード画像がない場合は Gravatar を利用する。
+	if user.Avatar != "upload" {
+		email := strings.ToLower(strings.TrimSpace(user.Email))
+
+		if email == "" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "avatar is not found"})
+			return
+		}
+
+		hash := sha256.Sum256([]byte(email))
+		emailHash := hex.EncodeToString(hash[:])
+
+		gravatarURL := fmt.Sprintf(
+			"https://www.gravatar.com/avatar/%s?d=404",
+			emailHash,
+		)
+
+		c.Redirect(http.StatusFound, gravatarURL)
+		return
+	}
+
+	// avatar == "upload" の場合のみ S3 を参照する。
 	s3Client, exists := c.Get("s3_client")
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "S3 client not found"})
@@ -2465,7 +2490,7 @@ func getAvatar(c *gin.Context) {
 
 	resp, err := client.GetObject(c.Request.Context(), getObjectInput)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "avatar is not found."})
+		c.JSON(http.StatusNotFound, gin.H{"error": "avatar is not found"})
 		return
 	}
 	defer resp.Body.Close()
@@ -2585,13 +2610,19 @@ func uploadAvatar(c *gin.Context) {
 		"avatar.jpg",
 	))
 
+	bucket := os.Getenv("RUSTFS_BUCKET")
+	if bucket == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "S3 bucket not configured"})
+		return
+	}
+
 	_, err = client.PutObject(c.Request.Context(), &s3.PutObjectInput{
-		Bucket: aws.String(os.Getenv("RUSTFS_BUCKET")),
+		Bucket:      aws.String(bucket),
 		Key:    aws.String(savePath),
 		Body:   bytes.NewReader(buf.Bytes()),
 		ContentType: aws.String("image/jpeg"),
 	})
-	
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload avatar"})
 		return
