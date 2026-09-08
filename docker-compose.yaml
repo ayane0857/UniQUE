@@ -129,6 +129,10 @@ services:
       DISCORD_GUILD_ID: "your-guild-id"
       DISCORD_BOT_TOKEN: "your-token-here"
       DISCORD_MEMBER_ROLE_ID: "your-member-role-id-here"
+      RUFTFS_ACCESS_KEY: "rustfs-access"
+      RUFTFS_SECRET_KEY: "rustfs-secret"
+      RUFTFS_ENDPOINT: "http://rustfs:9000"
+      RUFTFS_BUCKET: "unique"
       GIN_MODE: debug
     ports:
       - "8001:8080"
@@ -187,10 +191,24 @@ services:
       - "3001:80"
     networks:
       - unique
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: unique-rustfs
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      RUSTFS_ACCESS_KEY: rustfs-access
+      RUSTFS_SECRET_KEY: rustfs-secret
+    volumes:
+      - rustfs_data:/data
+    networks:
+      - unique
 
 volumes:
   db-data:
   auth-keys:
+  rustfs_data:
 
 networks:
   unique:

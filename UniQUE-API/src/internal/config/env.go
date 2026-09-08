@@ -16,6 +16,13 @@ type DiscordConfig struct {
 	BotToken     string
 }
 
+type RustFSConfig struct {
+    AccessKey string
+    SecretKey string
+    Endpoint  string
+    Bucket    string
+}
+
 type Config struct {
 	Env                string
 	AppName            string
@@ -28,6 +35,7 @@ type Config struct {
 	GitHubClientID     string
 	GitHubClientSecret string
 	DiscordApiVersion  string
+	RustFSConfig       RustFSConfig
 }
 
 // envが設定されていない場合のデフォルト値
@@ -89,6 +97,19 @@ func LoadConfig() *Config {
 	if DiscordConfig.ClientID == "" || DiscordConfig.ClientSecret == "" || DiscordConfig.Guild.ID == "" || DiscordConfig.Guild.MemberRoleID == "" || DiscordConfig.BotToken == "" {
 		panic("Discord configuration is not fully set in environment variables")
 	}
+	RustFSConfig := RustFSConfig{
+		AccessKey: os.Getenv("RUFTFS_ACCESS_KEY"),
+		SecretKey: os.Getenv("RUFTFS_SECRET_KEY"),
+		Endpoint:  os.Getenv("RUFTFS_ENDPOINT"),
+		Bucket:    os.Getenv("RUFTFS_BUCKET"),
+	}
+
+	if RustFSConfig.AccessKey == "" ||
+		RustFSConfig.SecretKey == "" ||
+		RustFSConfig.Endpoint == "" ||
+		RustFSConfig.Bucket == "" {
+		panic("RustFS configuration is not fully set in environment variables")
+	}
 	EnvEnv := os.Getenv("ENV")
 	if EnvEnv == "" {
 		EnvEnv = Env
@@ -106,6 +127,7 @@ func LoadConfig() *Config {
 		EmailSenderURL:     EmailSenderURLEnv,
 		Version:            version,
 		DiscordConfig:      DiscordConfig,
+		RustFSConfig:       RustFSConfig,
 		DiscordApiVersion:  DiscordApiVersionEnv,
 		GitHubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
 		GitHubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),

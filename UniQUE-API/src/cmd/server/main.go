@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,6 +12,12 @@ import (
 	"github.com/UniPro-tech/UniQUE-API/internal/middleware"
 	"github.com/UniPro-tech/UniQUE-API/internal/query"
 	"github.com/UniPro-tech/UniQUE-API/internal/routes"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+
 	swaggerfiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"gorm.io/gorm/logger"
@@ -48,7 +55,6 @@ func main() {
 	slog.SetDefault(slog.New(handler))
 
 	environmentConfigs := config.LoadConfig()
-
 	// Initialize database
 	dbConnection, err := db.NewDB()
 	if err != nil {
@@ -85,6 +91,32 @@ func main() {
 		c.Set("db", dbConnection)
 		c.Next()
 	})
+	// Load AWS config
+	ctx := context.Background()
+
+	awsCfg, err := awsconfig.LoadDefaultConfig(
+		ctx,
+		awsconfig.WithRegion("us-east-1"),
+		awsconfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(
+				environmentConfigs.RustFSConfig.AccessKey,
+				environmentConfigs.RustFSConfig.SecretKey,
+				"",
+			),
+		),
+	)
+	if err != nil {
+		slog.Error(
+			"Failed to initialize RustFS client",
+			slog.String("error", err.Error()),
+		)
+		os.Exit(1)
+	}
+
+	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(environmentConfigs.RustFSConfig.Endpoint)
+		o.UsePathStyle = true
+	})
 
 	r.Use(middleware.SlogMiddleware())
 	r.Use(middleware.AuthMiddleware())
@@ -92,13 +124,18 @@ func main() {
 
 	// Routes
 	r.GET("/health", healthCheck)
+	r.Use(func(c *gin.Context) {
+		c.Set("config", *environmentConfigs)
+		c.Set("db", dbConnection)
+		c.Set("s3", s3Client)
+		c.Next()
+	})
 
 	// Register resource routes
 	routes.RegisterUserRoutes(r)
 	routes.RegisterRoleRoutes(r)
 	routes.RegisterApplicationRoutes(r)
 	routes.RegisterAnnouncementRoutes(r)
-
 	// Start server
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerfiles.Handler))
 	r.Run()

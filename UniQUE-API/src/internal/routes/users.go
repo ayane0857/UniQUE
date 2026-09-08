@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,6 +24,8 @@ import (
 	"github.com/UniPro-tech/UniQUE-API/internal/query"
 	"github.com/UniPro-tech/UniQUE-API/internal/utils"
 	discordutil "github.com/UniPro-tech/UniQUE-API/internal/utils/discord"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/go-sql-driver/mysql"
 	"github.com/oklog/ulid/v2"
@@ -94,6 +98,13 @@ func registUserRouteFromGroup(g *gin.RouterGroup) {
 
 	// メール認証の再送は自分自身 OR USER_UPDATE権限
 	g.POST(":id/resend_email_verification", middleware.RequirePermissionOrSelf(constants.USER_UPDATE), resendEmailVerification)
+	
+	// アバターの取得は誰でも可能
+	g.GET(":id/avatar", getAvatar)
+
+	// アバターのアップロードは自分自身 OR USER_UPDATE権限
+	g.POST(":id/avatar", middleware.RequirePermissionOrSelf(constants.USER_UPDATE), uploadAvatar)
+	
 }
 
 // parseDateFlexible attempts to parse date/time strings in multiple
@@ -2400,4 +2411,98 @@ func isAdult(birthdate *time.Time) *bool {
 	}
 	isAdult := age >= 18
 	return &isAdult
+}
+
+func getAvatar(c *gin.Context) {
+	db := getDB(c)
+	if db == nil {
+		return
+	}
+
+	// ConfigはGinのContextから取得
+	cfg, exists := c.Get("config")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "config not found",
+		})
+		return
+	}
+
+	appConfig, ok := cfg.(config.Config)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "invalid config type",
+		})
+		return
+	}
+
+	id := c.Param("id")
+	q := query.Use(db)
+
+	if _, err := q.User.Where(query.User.ID.Eq(id)).First(); err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+
+		c.AbortWithError(http.StatusInternalServerError, err)
+		return
+	}
+
+	s3Client, exists := c.Get("s3_client")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "S3 client not found",
+		})
+		return
+	}
+
+	client, ok := s3Client.(*s3.Client)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "invalid S3 client type",
+		})
+		return
+	}
+
+	savePath := filepath.ToSlash(filepath.Join(
+		"users",
+		id,
+		"avatar.jpg",
+	))
+
+	bucket := appConfig.RustFSConfig.Bucket
+	if bucket == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "S3 bucket not configured",
+		})
+		return
+	}
+
+	getObjectInput := &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(savePath),
+	}
+
+	resp, err := client.GetObject(c.Request.Context(), getObjectInput)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "avatar is not found.",
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Error reading avatar body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to read avatar",
+		})
+		return
+	}
+
+	c.Data(http.StatusOK, "image/jpeg", body)
+}
+func uploadAvatar(c *gin.Context) {
 }
