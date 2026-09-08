@@ -2449,7 +2449,7 @@ func getAvatar(c *gin.Context) {
 		return
 	}
 
-	s3Client, exists := c.Get("s3_client")
+	s3Client, exists := c.Get("s3")
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "S3 client not found",

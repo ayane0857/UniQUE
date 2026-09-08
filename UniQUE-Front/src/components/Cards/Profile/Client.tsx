@@ -149,32 +149,6 @@ export default function ProfileClient({
 			setAvatarUploading(false);
 		}
 	};
-	useEffect(() => {
-		const fetchAvatar = async () => {
-			try {
-				const response = await fetch(
-					`${process.env.NEXT_PUBLIC_RESOURCE_API_URL}/users/${user.id}/avatar`,
-				);
-
-				if (!response.ok) {
-					if (response.status === 404) {
-						setAvatarUrl(null);
-						return;
-					}
-
-					throw new Error("アイコンの取得に失敗しました");
-				}
-
-				const data: { avatarUrl: string | null } = await response.json();
-
-				setAvatarUrl(data.avatarUrl);
-			} catch (error) {
-				console.error("アイコン取得エラー:", error);
-			}
-		};
-
-		fetchAvatar();
-	}, [user.id]);
 	return (
 		<Stack spacing={4} sx={{ maxWidth: 900, mx: "auto", width: "100%" }}>
 			{/* ページヘッダー部分 */}
@@ -256,7 +230,7 @@ export default function ProfileClient({
 					<Box sx={{ display: "flex", gap: 3, alignItems: "center" }}>
 						<Box sx={{ position: "relative", flexShrink: 0 }}>
 							<Avatar
-								src={avatarUrl ?? undefined}
+								src={`${process.env.NEXT_PUBLIC_RESOURCE_API_URL}/users/${user.id}/avatar`}
 								alt={displayName}
 								sx={{
 									width: 80,

@@ -12,6 +12,7 @@ import (
 	"github.com/UniPro-tech/UniQUE-API/internal/middleware"
 	"github.com/UniPro-tech/UniQUE-API/internal/query"
 	"github.com/UniPro-tech/UniQUE-API/internal/routes"
+	"github.com/gin-contrib/cors"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -118,6 +119,13 @@ func main() {
 		o.UsePathStyle = true
 	})
 
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowCredentials: true,
+	}))
+	
 	r.Use(middleware.SlogMiddleware())
 	r.Use(middleware.AuthMiddleware())
 	r.Use(middleware.AuditLogMiddleware())

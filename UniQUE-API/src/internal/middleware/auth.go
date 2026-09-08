@@ -80,6 +80,10 @@ func AuthMiddleware() gin.HandlerFunc {
 		if c.Request.Method == "GET" && strings.HasPrefix(c.Request.URL.Path, "/users/") {
 			// /users/:id のみをマッチ（サブパスは含まない）
 			path := strings.TrimPrefix(c.Request.URL.Path, "/users/")
+			if strings.HasSuffix(path, "/avatar") {
+				c.Next()
+				return
+			}
 			if !strings.Contains(path, "/") {
 				// サブパスがないので認証オプション（トークンがあれば検証）
 				authorization := c.GetHeader("Authorization")

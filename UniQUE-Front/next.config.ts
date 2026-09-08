@@ -1,5 +1,3 @@
-import type { NextConfig } from "next";
-
 const resourceApiUrl = process.env.NEXT_PUBLIC_RESOURCE_API_URL;
 
 const nextConfig: NextConfig = {
@@ -34,7 +32,7 @@ const nextConfig: NextConfig = {
 							process.env.NODE_ENV === "production"
 								? [
 										"default-src 'self'",
-										"img-src 'self' https://cdn.discordapp.com",
+										`img-src 'self' https://cdn.discordapp.com ${resourceApiUrl ?? ""}`,
 										"base-uri 'self'",
 										"frame-ancestors 'none'",
 										"object-src 'none'",
@@ -44,7 +42,7 @@ const nextConfig: NextConfig = {
 									].join("; ")
 								: [
 										"default-src 'self'",
-										"img-src 'self' https://cdn.discordapp.com",
+										`img-src 'self' https://cdn.discordapp.com ${resourceApiUrl ?? ""}`,
 										`connect-src 'self' ${resourceApiUrl ?? ""} https://static.cloudflareinsights.com`,
 										"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com",
 										"style-src 'self' 'unsafe-inline'",
