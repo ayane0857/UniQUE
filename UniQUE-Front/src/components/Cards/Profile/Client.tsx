@@ -1,11 +1,10 @@
 "use client";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useState } from "react";
 import {
 	ArrowBack as ArrowBackIcon,
 	Assignment as AssignmentIcon,
 	Badge as BadgeIcon,
 	Cake as CakeIcon,
-	CameraAlt as CameraAltIcon,
 	CalendarToday as CalendarIcon,
 	Edit as EditIcon,
 	Email as EmailIcon,
@@ -17,7 +16,6 @@ import {
 } from "@mui/icons-material";
 import {
 	Alert,
-	Avatar,
 	alpha,
 	Box,
 	Button,
@@ -39,6 +37,7 @@ import {
 	getAffiliationPeriodLabel,
 	getStatusLabel,
 } from "@/constants/UserConstants";
+import ProfileAvatar from "@/components/Sidebar/Avatar";
 
 interface ProfileProps {
 	user: UserData;
@@ -109,46 +108,9 @@ export default function ProfileClient({
 	const hasFullData = user?.email !== undefined || user?.status !== undefined;
 	const [editMode, setEditMode] = useState(false);
 	const [passwordResetOpen, setPasswordResetOpen] = useState(false);
-
-	const [avatarUrl, setAvatarUrl] = useState<string | null>(
-		userProfile?.avatarUrl ?? null,
-	);
-	const [avatarUploading, setAvatarUploading] = useState(false);
 	const displayName =
 		userProfile?.displayName || user?.customId || "名称未設定";
-	const handleAvatarChange = async (file: File | undefined) => {
-		if (!file) return;
 
-		if (!file.type.startsWith("image/")) {
-			alert("画像ファイルを選択してください");
-			return;
-		}
-
-		try {
-			setAvatarUploading(true);
-
-			const formData = new FormData();
-			formData.append("file", file);
-
-			const response = await fetch(`/api/users/${user.id}/avatar`, {
-				method: "POST",
-				body: formData,
-			});
-
-			if (!response.ok) {
-				throw new Error("アイコンのアップロードに失敗しました");
-			}
-
-			const data: { avatarUrl: string } = await response.json();
-
-			setAvatarUrl(data.avatarUrl);
-		} catch (error) {
-			console.error("アイコンアップロードエラー:", error);
-			alert("アイコンのアップロードに失敗しました");
-		} finally {
-			setAvatarUploading(false);
-		}
-	};
 	return (
 		<Stack spacing={4} sx={{ maxWidth: 900, mx: "auto", width: "100%" }}>
 			{/* ページヘッダー部分 */}
@@ -228,56 +190,11 @@ export default function ProfileClient({
 				<Stack spacing={4}>
 					{/* ユーザー基本情報 (アバターと名前) */}
 					<Box sx={{ display: "flex", gap: 3, alignItems: "center" }}>
-						<Box sx={{ position: "relative", flexShrink: 0 }}>
-							<Avatar
-								src={`${process.env.NEXT_PUBLIC_RESOURCE_API_URL}/users/${user.id}/avatar`}
-								alt={displayName}
-								sx={{
-									width: 80,
-									height: 80,
-									fontSize: "2rem",
-									bgcolor: theme.palette.primary.main,
-								}}
-							>
-								{displayName.charAt(0).toUpperCase()}
-							</Avatar>
-
-							{(variant === "self" || variant === "admin") && (
-								<>
-									<input
-										id="profile-avatar-upload"
-										type="file"
-										accept="image/jpeg,image/png,image/webp"
-										hidden
-										disabled={avatarUploading}
-										onChange={(event) => {
-											void handleAvatarChange(event.target.files?.[0]);
-											event.target.value = "";
-										}}
-									/>
-
-									<label htmlFor="profile-avatar-upload">
-										<Button
-											component="span"
-											variant="contained"
-											disabled={avatarUploading}
-											sx={{
-												position: "absolute",
-												right: -4,
-												bottom: -4,
-												minWidth: 32,
-												width: 32,
-												height: 32,
-												p: 0,
-												borderRadius: "50%",
-											}}
-										>
-											<CameraAltIcon fontSize="small" />
-										</Button>
-									</label>
-								</>
-							)}
-						</Box>
+						<ProfileAvatar
+							userId={user.id}
+							displayName={displayName}
+							variant={variant}
+						/>
 						<Box>
 							<Typography variant="h5" sx={{ fontWeight: "bold" }} gutterBottom>
 								{displayName}
@@ -527,16 +444,11 @@ export default function ProfileClient({
 										},
 									}}
 								>
-									<Avatar
-										src={identity.avatarUrl}
-										alt={identity.displayName || identity.username}
-										sx={{ width: 44, height: 44 }}
-									>
-										{/* 万が一画像がない場合のフォールバック */}
-										{(identity.displayName || identity.provider)
-											.charAt(0)
-											.toUpperCase()}
-									</Avatar>
+									<ProfileAvatar
+										userId={user.id}
+										displayName={displayName}
+										variant={variant}
+									/>
 									<Box sx={{ flexGrow: 1, minWidth: 0 }}>
 										<Stack
 											direction="row"

@@ -1,10 +1,12 @@
 package routes
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"log"
 	"net/http"
@@ -2504,5 +2506,283 @@ func getAvatar(c *gin.Context) {
 
 	c.Data(http.StatusOK, "image/jpeg", body)
 }
+
 func uploadAvatar(c *gin.Context) {
+	// OAuth access tokenでは変更不可
+	if isOAuth := IsOAuth(c); isOAuth {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "You are not allowed to perform this action with an access token",
+		})
+		return
+	}
+
+	db := getDB(c)
+	if db == nil {
+		return
+	}
+
+	id := c.Param("id")
+
+	// IDのパストラバーサル対策
+	if id == "" ||
+		strings.Contains(id, "/") ||
+		strings.Contains(id, "\\") ||
+		strings.Contains(id, "..") ||
+		filepath.IsAbs(id) ||
+		filepath.Clean(id) != id {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid user id",
+		})
+		return
+	}
+
+	q := query.Use(db)
+
+	// ユーザー存在確認
+	if _, err := q.User.Where(query.User.ID.Eq(id)).First(); err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "not found",
+			})
+			return
+		}
+
+		c.AbortWithError(http.StatusInternalServerError, err)
+		return
+	}
+
+	// リクエスト全体のサイズ制限
+	c.Request.Body = http.MaxBytesReader(
+		c.Writer,
+		c.Request.Body,
+		6*1024*1024,
+	)
+
+	// multipart/form-data の avatar を取得
+	fileHeader, err := c.FormFile("avatar")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "avatar file is required",
+		})
+		return
+	}
+
+	// 5MB制限
+	const maxAvatarSize = 5 * 1024 * 1024
+
+	if fileHeader.Size > maxAvatarSize {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "file size exceeds 5MB limit",
+		})
+		return
+	}
+
+	// 拡張子チェック
+	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
+
+	switch ext {
+	case ".jpg", ".jpeg", ".png":
+		// OK
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "unsupported file extension",
+		})
+		return
+	}
+
+	// ファイルを開く
+	file, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to open uploaded file",
+		})
+		return
+	}
+	defer file.Close()
+
+	// 画像として有効か確認
+	//
+	// DecodeConfigは画像全体をデコードせず、
+	// JPEG/PNG等の画像情報を確認できる。
+	_, _, err = image.DecodeConfig(file)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid image file",
+		})
+		return
+	}
+
+	// ファイルポインタを先頭へ戻す
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to seek uploaded file",
+		})
+		return
+	}
+
+	// ファイルをメモリへ読み込む
+	//
+	// 最大5MBなので、この程度なら問題ない。
+	data, err := io.ReadAll(io.LimitReader(
+		file,
+		maxAvatarSize+1,
+	))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to read uploaded file",
+		})
+		return
+	}
+
+	// 念のため実データでもサイズ確認
+	if len(data) > maxAvatarSize {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "file size exceeds 5MB limit",
+		})
+		return
+	}
+
+	// S3 Client取得
+	s3Value, exists := c.Get("s3")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "S3 client not found",
+		})
+		return
+	}
+
+	client, ok := s3Value.(*s3.Client)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "invalid S3 client type",
+		})
+		return
+	}
+
+	// Config取得
+	cfg, exists := c.Get("config")
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "config not found",
+		})
+		return
+	}
+
+	appConfig, ok := cfg.(config.Config)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "invalid config type",
+		})
+		return
+	}
+
+	bucket := appConfig.RustFSConfig.Bucket
+	if bucket == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "S3 bucket not configured",
+		})
+		return
+	}
+
+	// 保存先
+	savePath := filepath.ToSlash(filepath.Join(
+		"users",
+		id,
+		"avatar"+ext,
+	))
+
+	ctx := c.Request.Context()
+
+	// Content-Type
+	contentType := "image/jpeg"
+
+	if ext == ".png" {
+		contentType = "image/png"
+	}
+
+	// S3へアップロード
+	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(savePath),
+
+		Body: bytes.NewReader(data),
+
+		ContentType: aws.String(contentType),
+	})
+
+	if err != nil {
+		log.Printf(
+			"failed to upload avatar to S3: %v",
+			err,
+		)
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to upload avatar",
+		})
+		return
+	}
+
+	// 拡張子が変わった場合に古いavatarを削除
+	//
+	// 例:
+	// 以前 avatar.png
+	// 今回 avatar.jpg
+	//
+	// → avatar.png を削除する。
+	extensions := []string{
+		".jpg",
+		".jpeg",
+		".png",
+	}
+
+	for _, oldExt := range extensions {
+		if oldExt == ext {
+			continue
+		}
+
+		oldPath := filepath.ToSlash(filepath.Join(
+			"users",
+			id,
+			"avatar"+oldExt,
+		))
+
+		_, err := client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(oldPath),
+		})
+
+		if err != nil {
+			// 削除失敗してもアップロード自体は成功しているので
+			// ログだけ出す。
+			log.Printf(
+				"failed to delete old avatar %s: %v",
+				oldPath,
+				err,
+			)
+		}
+	}
+
+	// DB更新
+	_, err = q.Profile.
+		Where(query.Profile.UserID.Eq(id)).
+		Updates(map[string]interface{}{
+			"avatar":     "upload",
+			"updated_at": time.Now().UTC(),
+		})
+
+	if err != nil {
+		log.Printf(
+			"failed to update profile avatar: %v",
+			err,
+		)
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to update profile",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "avatar uploaded successfully",
+	})
 }
